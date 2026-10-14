@@ -18,19 +18,15 @@ Deno.serve(async (req: Request) => {
   if (sessionError || !validSession) return respond({ error: 'Sesión caducada. Vuelve a ingresar.' }, 401)
   const { data: actor, error: actorError } = await client.from('invayal_employees').select('*').eq('user_id', auth.user.id).single()
   if (actorError || !actor?.active) return respond({ error: 'Cuenta no habilitada.' }, 403)
+  // La acción ya se aplicó: un fallo de auditoría se registra pero no se reporta como error al usuario.
+  const audit = async (row: Record<string, unknown>) => {
+    const { error } = await client.from('invayal_audit_log').insert({ actor_user_id: actor.user_id, ...row })
+    if (error) console.error('invayal-admin: no se pudo auditar', row.operation, error)
+  }
   try {
     const body = await req.json()
     if (typeof body.password === 'string' && (body.password.length < 12 || body.password.length > 72)) return respond({ error: 'La contraseña debe tener entre 12 y 72 caracteres.' }, 400)
-    if (body.action === 'changePassword') {
-      if (typeof body.password !== 'string') return respond({ error: 'Contraseña requerida.' }, 400)
-      const { error } = await client.auth.admin.updateUserById(auth.user.id, { password: body.password })
-      if (error) throw error
-      const { error: saved } = await client.from('invayal_employees').update({ must_change_password: false }).eq('id', actor.id)
-      if (saved) throw saved
-      await client.from('invayal_audit_log').insert({ actor_user_id: actor.user_id, entity: 'auth', operation: 'PASSWORD_CHANGED', reason: 'Cambio de contraseña propia' })
-      return respond({ ok: true })
-    }
-    if (actor.role !== 'admin' || actor.must_change_password) return respond({ error: 'Se requiere administrador con contraseña actualizada.' }, 403)
+    if (actor.role !== 'admin') return respond({ error: 'Se requiere acceso de administrador.' }, 403)
     if (body.action === 'create') {
       const username = String(body.username ?? '').trim().toLowerCase()
       const fullName = String(body.fullName ?? '').trim()
@@ -41,35 +37,47 @@ Deno.serve(async (req: Request) => {
       if (existing) return respond({ error: 'El usuario ya existe.' }, 409)
       const { data: created, error } = await client.auth.admin.createUser({ email: `${username}@invayal.invalid`, password: body.password, email_confirm: true })
       if (error || !created.user) return respond({ error: 'No se pudo crear la cuenta. Verifica que el usuario no exista.' }, 400)
-      const { error: saved } = await client.from('invayal_employees').insert({ user_id: created.user.id, username, full_name: fullName, department_id: department.id, role: 'employee', active: true, must_change_password: true })
+      const { error: saved } = await client.from('invayal_employees').insert({ user_id: created.user.id, username, full_name: fullName, department_id: department.id, role: 'employee', active: true })
       if (saved) {
         await client.auth.admin.deleteUser(created.user.id)
         throw saved
       }
-      await client.from('invayal_audit_log').insert({ actor_user_id: actor.user_id, entity: 'auth', operation: 'USER_CREATED', after_data: { username }, reason: 'Alta de empleado' })
+      await audit({ entity: 'auth', operation: 'USER_CREATED', after_data: { username }, reason: 'Alta de empleado' })
       return respond({ ok: true })
     }
     const { data: target } = await client.from('invayal_employees').select('*').eq('id', body.employeeId).single()
     if (!target) return respond({ error: 'Empleado no encontrado.' }, 404)
+    if (target.id === actor.id) return respond({ error: 'No puedes modificar tu propia cuenta desde aquí.' }, 400)
+    if (body.action === 'revokeSessions') {
+      // Cierra todas las sesiones del usuario: elimina sus refresh tokens y el guard invalida el access token vigente.
+      if (!target.user_id) return respond({ error: 'La cuenta no tiene acceso configurado.' }, 400)
+      const { error } = await client.rpc('invayal_revoke_sessions', { target_user: target.user_id })
+      if (error) throw error
+      await audit({ entity: 'auth', operation: 'SESSIONS_REVOKED', after_data: { employee_id: target.id }, reason: 'Cierre de sesión por administrador' })
+      return respond({ ok: true })
+    }
+    // Un administrador no puede desactivar ni tomar la cuenta de otro administrador.
+    if (target.role === 'admin') return respond({ error: 'Las cuentas de administrador no se gestionan desde aquí.' }, 403)
     if (body.action === 'setActive') {
-      if (target.id === actor.id || typeof body.active !== 'boolean') return respond({ error: 'No puedes desactivar tu propia cuenta.' }, 400)
+      if (typeof body.active !== 'boolean') return respond({ error: 'Estado de acceso inválido.' }, 400)
       const { error } = await client.from('invayal_employees').update({ active: body.active }).eq('id', target.id)
       if (error) throw error
-      await client.from('invayal_audit_log').insert({ actor_user_id: actor.user_id, entity: 'employee', operation: 'ACCESS_CHANGED', after_data: { id: target.id, active: body.active }, reason: 'Cambio de acceso por administrador' })
+      await audit({ entity: 'employee', operation: 'ACCESS_CHANGED', after_data: { id: target.id, active: body.active }, reason: 'Cambio de acceso por administrador' })
       return respond({ ok: true })
     }
     if (body.action === 'resetPassword') {
       if (!target.user_id || typeof body.password !== 'string') return respond({ error: 'Cuenta o contraseña inválida.' }, 400)
-      // Bloquea las marcaciones hasta completar el cambio de contraseña.
-      const { error: lockError } = await client.from('invayal_employees').update({ must_change_password: true }).eq('id', target.id)
-      if (lockError) throw lockError
-      const { error } = await client.auth.admin.updateUserById(target.user_id, { password: body.password })
-      if (error) throw error
+      // Revoca antes de cambiar la contraseña: si la revocación falla, la contraseña anterior queda intacta.
       const { error: revokeError } = await client.rpc('invayal_revoke_sessions', { target_user: target.user_id })
       if (revokeError) throw revokeError
-      await client.from('invayal_audit_log').insert({ actor_user_id: actor.user_id, entity: 'auth', operation: 'PASSWORD_RESET', after_data: { employee_id: target.id }, reason: 'Restablecimiento por administrador' })
+      const { error } = await client.auth.admin.updateUserById(target.user_id, { password: body.password })
+      if (error) throw error
+      await audit({ entity: 'auth', operation: 'PASSWORD_RESET', after_data: { employee_id: target.id }, reason: 'Restablecimiento por administrador' })
       return respond({ ok: true })
     }
     return respond({ error: 'Acción inválida.' }, 400)
-  } catch { return respond({ error: 'No se pudo completar la operación. Verifica los datos e inténtalo de nuevo.' }, 400) }
+  } catch (error) {
+    console.error('invayal-admin:', error)
+    return respond({ error: 'No se pudo completar la operación. Verifica los datos e inténtalo de nuevo.' }, 400)
+  }
 })

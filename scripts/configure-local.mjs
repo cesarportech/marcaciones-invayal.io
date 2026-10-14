@@ -22,7 +22,7 @@ if (count === 0) {
   const password = `Dev-${randomBytes(18).toString('base64url')}!`
   const { data, error } = await local.auth.admin.createUser({ email: 'administrador@invayal.invalid', password, email_confirm: true })
   if (error) throw new Error('No se pudo crear el administrador local. Revisa si ya existe en Auth.')
-  const { error: saved } = await local.from('invayal_employees').insert({ user_id: data.user.id, username: 'administrador', full_name: 'Administrador DEV', department_id: department.id, role: 'admin', active: true, must_change_password: true })
+  const { error: saved } = await local.from('invayal_employees').insert({ user_id: data.user.id, username: 'administrador', full_name: 'Administrador DEV', department_id: department.id, role: 'admin', active: true })
   if (saved) { await local.auth.admin.deleteUser(data.user.id); throw new Error('No se pudo vincular el administrador local.') }
   mkdirSync('.invayal-private', { recursive: true })
   writeFileSync('.invayal-private/ACCESO-DEV.txt', `Solo DEV local\nUsuario: administrador\nContraseña temporal: ${password}\n`)

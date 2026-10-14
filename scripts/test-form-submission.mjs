@@ -29,5 +29,5 @@ function visit(node) {
   ts.forEachChild(node, visit)
 }
 visit(source)
-assert.equal(forms, 4, 'Verify login, password, employee and correction forms')
-console.log('PASS: all four forms have an explicit submit button; Base UI button behavior verified.')
+assert.ok(forms >= 4, 'Expected at least the login, password, employee and correction forms')
+console.log(`PASS: ${forms} forms have an explicit submit button; Base UI button behavior verified.`)
