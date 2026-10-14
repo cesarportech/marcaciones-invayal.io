@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
-  DEPARTMENTS,
   STATUS_LABELS,
   formatDisplayDate,
   formatDuration,
@@ -31,11 +30,6 @@ import { StatusBadge } from "../status-badge"
 
 const PAGE_SIZE = 10
 
-const departmentItems = [
-  { label: "Todos los departamentos", value: "all" },
-  ...DEPARTMENTS.map((d) => ({ label: d, value: d })),
-]
-
 const statusItems = [
   { label: "Todos los estados", value: "all" },
   ...(Object.keys(STATUS_LABELS) as AttendanceStatus[]).map((s) => ({ label: STATUS_LABELS[s], value: s })),
@@ -51,7 +45,6 @@ type MasterAttendanceTableProps = {
 
 export function MasterAttendanceTable({ employees, records, todayISO }: MasterAttendanceTableProps) {
   const [query, setQuery] = useState("")
-  const [department, setDepartment] = useState("all")
   const [status, setStatus] = useState("all")
   const [range, setRange] = useState<DateRange | undefined>(() => {
     const to = parseISODate(todayISO)
@@ -74,14 +67,13 @@ export function MasterAttendanceTable({ employees, records, todayISO }: MasterAt
       .filter(({ record, employee, status: rowStatus }) => {
         if (!employee) return false
         if (normalized && !`${employee.fullName} ${employee.username}`.toLowerCase().includes(normalized)) return false
-        if (department !== "all" && employee.department !== department) return false
         if (status !== "all" && rowStatus !== status) return false
         if (fromISO && record.date < fromISO) return false
         if (toISO && record.date > toISO) return false
         return true
       })
       .sort((a, b) => b.record.date.localeCompare(a.record.date) || a.employee!.fullName.localeCompare(b.employee!.fullName))
-  }, [records, employeeById, query, department, status, range])
+  }, [records, employeeById, query, status, range])
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount - 1)
@@ -163,22 +155,6 @@ export function MasterAttendanceTable({ employees, records, todayISO }: MasterAt
               className="h-9 pl-9"
             />
           </div>
-          <Select
-            items={departmentItems}
-            value={department}
-            onValueChange={(v) => resetPage(setDepartment)(v ?? "all")}
-          >
-            <SelectTrigger className="h-9 w-full xl:w-52" aria-label="Filtrar por departamento">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {departmentItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Select items={statusItems} value={status} onValueChange={(v) => resetPage(setStatus)(v ?? "all")}>
             <SelectTrigger className="h-9 w-full xl:w-44" aria-label="Filtrar por estado">
               <SelectValue />
@@ -221,7 +197,6 @@ export function MasterAttendanceTable({ employees, records, todayISO }: MasterAt
             <TableHeader className="bg-muted/50">
               <TableRow>
                 <TableHead>Empleado</TableHead>
-                <TableHead>Departamento</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Entrada</TableHead>
                 <TableHead>Salida</TableHead>
@@ -232,7 +207,7 @@ export function MasterAttendanceTable({ employees, records, todayISO }: MasterAt
             <TableBody>
               {visibleRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-28 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-28 text-center text-muted-foreground">
                     No se encontraron registros con los filtros seleccionados.
                   </TableCell>
                 </TableRow>
@@ -252,7 +227,6 @@ export function MasterAttendanceTable({ employees, records, todayISO }: MasterAt
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{employee!.department}</TableCell>
                   <TableCell className="capitalize">{formatDisplayDate(record.date)}</TableCell>
                   <TableCell className="font-mono tabular-nums">{record.clockIn ?? "—"}</TableCell>
                   <TableCell className="font-mono tabular-nums">

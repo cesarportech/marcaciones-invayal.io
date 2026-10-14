@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
       const username = String(body.username ?? '').trim().toLowerCase()
       const fullName = String(body.fullName ?? '').trim()
       if (!/^[a-z0-9._]{3,30}$/.test(username) || fullName.length < 3 || fullName.length > 150 || typeof body.password !== 'string') return respond({ error: 'Revisa nombre, usuario y contraseña.' }, 400)
-      const { data: department } = await client.from('invayal_departments').select('id').eq('id', body.departmentId).single()
+      const { data: department } = await client.from('invayal_departments').select('id').eq('name', 'Contabilidad').single()
       if (!department) return respond({ error: 'Departamento inválido.' }, 400)
       const { data: existing } = await client.from('invayal_employees').select('id').eq('username', username).maybeSingle()
       if (existing) return respond({ error: 'El usuario ya existe.' }, 409)
@@ -58,6 +58,16 @@ Deno.serve(async (req: Request) => {
     }
     // Un administrador no puede desactivar ni tomar la cuenta de otro administrador.
     if (target.role === 'admin') return respond({ error: 'Las cuentas de administrador no se gestionan desde aquí.' }, 403)
+    if (body.action === 'updateEmployee') {
+      const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : ''
+      if (fullName.length < 3 || fullName.length > 150) return respond({ error: 'El nombre debe tener entre 3 y 150 caracteres.' }, 400)
+      const { data: department } = await client.from('invayal_departments').select('id').eq('name', 'Contabilidad').single()
+      if (!department) return respond({ error: 'Departamento inválido.' }, 400)
+      const { error } = await client.from('invayal_employees').update({ full_name: fullName, department_id: department.id }).eq('id', target.id)
+      if (error) throw error
+      await audit({ entity: 'employee', operation: 'EMPLOYEE_UPDATED', before_data: { id: target.id, full_name: target.full_name, department_id: target.department_id }, after_data: { id: target.id, full_name: fullName, department_id: department.id }, reason: 'Edición de empleado por administrador' })
+      return respond({ ok: true })
+    }
     if (body.action === 'setActive') {
       if (typeof body.active !== 'boolean') return respond({ error: 'Estado de acceso inválido.' }, 400)
       const { error } = await client.from('invayal_employees').update({ active: body.active }).eq('id', target.id)

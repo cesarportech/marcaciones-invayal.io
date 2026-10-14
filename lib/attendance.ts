@@ -1,4 +1,5 @@
 export type Department =
+  | "Contabilidad"
   | "Operaciones"
   | "Ventas"
   | "Finanzas"

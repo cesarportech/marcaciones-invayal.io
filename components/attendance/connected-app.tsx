@@ -189,27 +189,30 @@ function EmployeeAdmin({ snapshot, refresh }: { snapshot: Snapshot; refresh: () 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [resetId, setResetId] = useState('')
+  const [editId, setEditId] = useState('')
+  const editing = snapshot.profiles.find(p => p.id === editId)
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const form = e.currentTarget; const values = Object.fromEntries(new FormData(form))
     setBusy(true); setError('')
-    try { await adminAction(resetId ? { action: 'resetPassword', employeeId: resetId, password: values.password } : { action: 'create', ...values }); form.reset(); setResetId(''); await refresh(); toast.success(resetId ? 'Contraseña restablecida. Se cerraron las sesiones del usuario.' : 'Empleado creado.') }
+    try { await adminAction(resetId ? { action: 'resetPassword', employeeId: resetId, password: values.password } : editId ? { action: 'updateEmployee', employeeId: editId, fullName: values.fullName } : { action: 'create', ...values }); form.reset(); setResetId(''); setEditId(''); await refresh(); toast.success(editId ? 'Empleado actualizado.' : resetId ? 'Contraseña restablecida. Se cerraron las sesiones del usuario.' : 'Empleado creado.') }
     catch (e) { setError(e instanceof Error ? e.message : 'Error al guardar.') } finally { setBusy(false) }
   }
   return <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
     <Card><CardHeader><CardTitle>Empleados ({snapshot.profiles.length})</CardTitle></CardHeader><CardContent className="space-y-3">
       {snapshot.profiles.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div><p className="font-medium">{p.full_name}</p><p className="text-xs text-muted-foreground">{p.username} · {p.role === 'admin' ? 'Administrador' : 'Empleado'} · {p.active ? 'Activo' : 'Inactivo'}</p><p className="text-xs text-muted-foreground">{sessionLabel(snapshot.sessions[p.user_id], snapshot.sessionsAvailable)}</p></div><div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={() => setResetId(p.id)}>Restablecer contraseña</Button>
+        <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={() => { setEditId(p.id); setResetId(''); setError('') }}>Editar</Button>
+        <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={() => { setResetId(p.id); setEditId(''); setError('') }}>Restablecer contraseña</Button>
         <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={async () => { setBusy(true); setError(''); try { await adminAction({ action: 'setActive', employeeId: p.id, active: !p.active }); await refresh() } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.') } finally { setBusy(false) } }}>{p.active ? 'Desactivar' : 'Activar'}</Button>
         <Button variant="outline" size="sm" disabled={busy || p.id === snapshot.profile.id || !snapshot.sessions[p.user_id]} onClick={async () => { setBusy(true); setError(''); try { await adminAction({ action: 'revokeSessions', employeeId: p.id }); await refresh(); toast.success(`Sesión cerrada para ${p.username}.`) } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cerrar la sesión.') } finally { setBusy(false) } }}>Cerrar sesión</Button>
       </div></div>)}
     </CardContent></Card>
-    <Card><CardHeader><CardTitle>{resetId ? `Nueva contraseña: ${snapshot.profiles.find(p => p.id === resetId)?.username}` : 'Crear empleado'}</CardTitle></CardHeader><CardContent>
+    <Card><CardHeader><CardTitle>{resetId ? `Nueva contraseña: ${snapshot.profiles.find(p => p.id === resetId)?.username}` : editing ? `Editar empleado: ${editing.username}` : 'Crear empleado'}</CardTitle></CardHeader><CardContent>
       {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
-      <form className="flex flex-col gap-3" onSubmit={submit}>
-        {!resetId && <><Label htmlFor="fullName">Nombre completo</Label><Input name="fullName" id="fullName" minLength={3} maxLength={150} required /><Label htmlFor="username">Usuario</Label><Input name="username" id="username" pattern="[a-z0-9._]{3,30}" title="De 3 a 30 letras minúsculas, números, puntos o guiones bajos" required /><Label htmlFor="departmentId">Departamento</Label><select className="h-10 rounded-md border bg-background px-3" name="departmentId" id="departmentId" required>{snapshot.departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></>}
-        <Label htmlFor="initial-password">Contraseña</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={4} maxLength={72} required />
-        <Button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{resetId && <Button type="button" variant="outline" onClick={() => setResetId('')}>Cancelar</Button>}
-        <p className="text-xs text-muted-foreground">Entrega la contraseña al empleado de forma privada. No se muestra ni se guarda en los reportes.</p>
+      <form key={editId || resetId || 'create'} className="flex flex-col gap-3" onSubmit={submit}>
+        {!resetId && <><Label htmlFor="fullName">Nombre completo</Label><Input name="fullName" id="fullName" defaultValue={editing?.full_name ?? ''} minLength={3} maxLength={150} required /><Label htmlFor="username">Usuario</Label><Input name="username" id="username" defaultValue={editing?.username ?? ''} readOnly={!!editId} pattern="[a-z0-9._]{3,30}" title="De 3 a 30 letras minúsculas, números, puntos o guiones bajos" required />{editId && <p className="text-xs text-muted-foreground">El usuario de acceso se conserva.</p>}</>}
+        {!editId && <><Label htmlFor="initial-password">Contraseña</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={4} maxLength={72} required /></>}
+        <Button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{(resetId || editId) && <Button type="button" variant="outline" disabled={busy} onClick={() => { setResetId(''); setEditId(''); setError('') }}>Cancelar</Button>}
+        {!editId && <p className="text-xs text-muted-foreground">Entrega la contraseña al empleado de forma privada. No se muestra ni se guarda en los reportes.</p>}
       </form>
     </CardContent></Card>
   </div>
