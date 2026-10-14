@@ -141,7 +141,7 @@ export function ConnectedApp() {
             }) }}>
               <Label htmlFor="new-password">Nueva contraseña</Label><Input id="new-password" type="password" autoComplete="new-password" minLength={12} maxLength={72} required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
               <Label htmlFor="confirm-password">Confirmar contraseña</Label><Input id="confirm-password" type="password" autoComplete="new-password" minLength={12} maxLength={72} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-              <Button disabled={busy}>Guardar contraseña</Button>
+              <Button type="submit" disabled={busy}>{busy ? 'Guardando contraseña…' : 'Guardar contraseña'}</Button>
               {!snapshot.profile.must_change_password && <Button type="button" variant="outline" onClick={() => setChangingPassword(false)}>Cancelar</Button>}
             </form>
           </CardContent></Card> : <>
@@ -184,7 +184,7 @@ function EmployeeAdmin({ snapshot, refresh }: { snapshot: Snapshot; refresh: () 
       <form className="flex flex-col gap-3" onSubmit={submit}>
         {!resetId && <><Label htmlFor="fullName">Nombre completo</Label><Input name="fullName" id="fullName" minLength={3} maxLength={150} required /><Label htmlFor="username">Usuario</Label><Input name="username" id="username" pattern="[a-z0-9._]{3,30}" title="De 3 a 30 letras minúsculas, números, puntos o guiones bajos" required /><Label htmlFor="departmentId">Departamento</Label><select className="h-10 rounded-md border bg-background px-3" name="departmentId" id="departmentId" required>{snapshot.departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></>}
         <Label htmlFor="initial-password">Contraseña temporal</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={12} maxLength={72} required />
-        <Button disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{resetId && <Button type="button" variant="outline" onClick={() => setResetId('')}>Cancelar</Button>}
+        <Button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{resetId && <Button type="button" variant="outline" onClick={() => setResetId('')}>Cancelar</Button>}
         <p className="text-xs text-muted-foreground">Entrega la contraseña al empleado de forma privada. No se muestra ni se guarda en los reportes.</p>
       </form>
     </CardContent></Card>
@@ -205,7 +205,7 @@ function CorrectionForm({ snapshot, refresh }: { snapshot: Snapshot; refresh: ()
         if (error) throw new Error(error.message)
         await refresh(); setRecordId(''); toast.success('Corrección guardada con auditoría.')
       } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo corregir.') } finally { setBusy(false) }
-    }}><Label htmlFor="entry">Entrada (Honduras)</Label><Input type="time" name="entry" id="entry" defaultValue={record.clockIn ?? ''} required /><Label htmlFor="exit">Salida (dejar vacía si está pendiente)</Label><Input type="time" name="exit" id="exit" defaultValue={record.clockOut ?? ''} /><Label htmlFor="reason">Motivo</Label><Input name="reason" id="reason" minLength={10} maxLength={500} required /><Button disabled={busy}>Guardar corrección</Button></form>}
+    }}><Label htmlFor="entry">Entrada (Honduras)</Label><Input type="time" name="entry" id="entry" defaultValue={record.clockIn ?? ''} required /><Label htmlFor="exit">Salida (dejar vacía si está pendiente)</Label><Input type="time" name="exit" id="exit" defaultValue={record.clockOut ?? ''} /><Label htmlFor="reason">Motivo</Label><Input name="reason" id="reason" minLength={10} maxLength={500} required /><Button type="submit" disabled={busy}>{busy ? 'Guardando corrección…' : 'Guardar corrección'}</Button></form>}
     {error && <p role="alert" className="mt-3 text-destructive">{error}</p>}
   </CardContent></Card>
 }
