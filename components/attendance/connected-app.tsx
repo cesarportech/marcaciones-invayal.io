@@ -17,7 +17,7 @@ import { OverviewWidgets } from './master/overview-widgets'
 
 type Profile = { id: string; user_id: string; username: string; full_name: string; department_id: string; role: 'admin' | 'employee'; active: boolean }
 type DepartmentRow = { id: string; name: string }
-type Policy = { start_time: string; end_time: string; tolerance_minutes: number; workdays: number[] }
+type Policy = { start_time: string; end_time: string; tolerance_minutes: number; workdays: number[]; office_ips: string[]; require_office_network: boolean }
 type SessionInfo = { sessions: number; last_seen: string | null }
 type Snapshot = { profile: Profile; profiles: Profile[]; sessions: Record<string, SessionInfo>; employees: Employee[]; records: AttendanceRecord[]; rawTimes: Record<string, { clock_in: string; clock_out: string | null }>; departments: DepartmentRow[]; policy: Policy }
 
@@ -163,7 +163,7 @@ export function ConnectedApp() {
               {tab === 'attendance' && <MasterAttendanceTable employees={snapshot.employees} records={snapshot.records} todayISO={today} />}
               {tab === 'employees' && <EmployeeAdmin snapshot={snapshot} refresh={refresh} />}
               {tab === 'corrections' && <CorrectionForm snapshot={snapshot} refresh={refresh} />}
-              {tab === 'maintenance' && <PurgeHistory refresh={refresh} />}
+              {tab === 'maintenance' && <div className="flex flex-col gap-6"><OfficeNetwork policy={snapshot.policy} refresh={refresh} /><PurgeHistory refresh={refresh} /></div>}
             </div> : employee && <div aria-busy={busy} className={busy ? 'pointer-events-none opacity-70' : ''}><EmployeeView employee={employee} records={snapshot.records} todayISO={today} now={now} isSunday={restDay} policy={snapshot.policy} onClockIn={() => void run(async () => { const { error } = await supabase!.rpc('invayal_clock', { kind: 'in' }); if (error) throw new Error(error.message); await refresh(); toast.success('Entrada registrada en Supabase.') })} onClockOut={() => void run(async () => { const { error } = await supabase!.rpc('invayal_clock', { kind: 'out' }); if (error) throw new Error(error.message); await refresh(); toast.success('Salida registrada en Supabase.') })} /></div>}
           </>
         </>}
@@ -201,7 +201,7 @@ function EmployeeAdmin({ snapshot, refresh }: { snapshot: Snapshot; refresh: () 
       {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
       <form className="flex flex-col gap-3" onSubmit={submit}>
         {!resetId && <><Label htmlFor="fullName">Nombre completo</Label><Input name="fullName" id="fullName" minLength={3} maxLength={150} required /><Label htmlFor="username">Usuario</Label><Input name="username" id="username" pattern="[a-z0-9._]{3,30}" title="De 3 a 30 letras minúsculas, números, puntos o guiones bajos" required /><Label htmlFor="departmentId">Departamento</Label><select className="h-10 rounded-md border bg-background px-3" name="departmentId" id="departmentId" required>{snapshot.departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></>}
-        <Label htmlFor="initial-password">Contraseña</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={12} maxLength={72} required />
+        <Label htmlFor="initial-password">Contraseña</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={4} maxLength={72} required />
         <Button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{resetId && <Button type="button" variant="outline" onClick={() => setResetId('')}>Cancelar</Button>}
         <p className="text-xs text-muted-foreground">Entrega la contraseña al empleado de forma privada. No se muestra ni se guarda en los reportes.</p>
       </form>
@@ -230,6 +230,53 @@ function CorrectionForm({ snapshot, refresh }: { snapshot: Snapshot; refresh: ()
       } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo corregir.') } finally { setBusy(false) }
     }}><Label htmlFor="entry">Entrada (Honduras)</Label><Input type="time" name="entry" id="entry" defaultValue={record.clockIn ?? ''} required /><Label htmlFor="exit">Salida (dejar vacía si está pendiente)</Label><Input type="time" name="exit" id="exit" defaultValue={record.clockOut ?? ''} /><Label htmlFor="reason">Motivo</Label><Input name="reason" id="reason" minLength={10} maxLength={500} required /><Button type="submit" disabled={busy}>{busy ? 'Guardando corrección…' : 'Guardar corrección'}</Button></form>}
     {error && <p role="alert" className="mt-3 text-destructive">{error}</p>}
+  </CardContent></Card>
+}
+
+// IPv6 cambia dentro del prefijo /64 que asigna el proveedor; IPv4 se guarda como dirección exacta.
+function officeRange(ip: string) {
+  return ip.includes(':') ? `${ip}/64` : ip
+}
+
+function OfficeNetwork({ policy, refresh }: { policy: Policy; refresh: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [network, setNetwork] = useState<{ ip: string | null; allowed: boolean } | null>(null)
+  const [manual, setManual] = useState('')
+
+  async function detect() {
+    const { data, error } = await supabase!.rpc('invayal_network_info')
+    if (error) throw new Error(error.message)
+    setNetwork(data)
+  }
+  useEffect(() => { detect().catch(e => setError(e instanceof Error ? e.message : 'No se pudo detectar la red.')) }, [policy])
+
+  async function save(changes: Partial<Pick<Policy, 'office_ips' | 'require_office_network'>>, message: string) {
+    setBusy(true); setError('')
+    try {
+      const { error } = await supabase!.from('invayal_attendance_policy').update(changes).eq('id', true)
+      if (error) throw new Error(error.code === '23514' ? 'Agrega al menos una IP antes de activar la restricción.' : error.code === '22P02' ? 'La IP no es válida.' : error.message)
+      await refresh(); toast.success(message)
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.') } finally { setBusy(false) }
+  }
+  const add = (ip: string) => policy.office_ips.includes(ip) ? setError('Esa IP ya está en la lista.') : void save({ office_ips: [...policy.office_ips, ip] }, `IP ${ip} agregada.`)
+
+  return <Card className="max-w-xl"><CardHeader><CardTitle>Red de la oficina</CardTitle><p className="text-sm text-muted-foreground">Con la restricción activa, solo se puede marcar desde la conexión a internet de la oficina. La IP de cada marcación queda registrada.</p></CardHeader><CardContent className="flex flex-col gap-4">
+    <div className="rounded-lg border p-3 text-sm">
+      <p>Estado: <strong>{policy.require_office_network ? 'Restricción activa' : 'Restricción desactivada (se puede marcar desde cualquier red)'}</strong></p>
+      <p className="mt-1 text-muted-foreground">Tu IP actual: {network ? (network.ip ?? 'no detectada') : '…'}{network?.ip && (network.allowed ? ' · permitida' : ' · no está en la lista')}</p>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" disabled={busy || !network?.ip || network.allowed} onClick={() => network?.ip && add(officeRange(network.ip))}>Agregar mi IP actual</Button>
+      <Button type="button" variant={policy.require_office_network ? 'outline' : 'default'} disabled={busy || (!policy.require_office_network && policy.office_ips.length === 0)} onClick={() => void save({ require_office_network: !policy.require_office_network }, policy.require_office_network ? 'Restricción desactivada.' : 'Restricción activada.')}>{policy.require_office_network ? 'Desactivar restricción' : 'Activar restricción'}</Button>
+    </div>
+    <ul className="flex flex-col gap-2">{policy.office_ips.map(ip => <li key={ip} className="flex items-center justify-between gap-3 rounded-lg border p-2 text-sm"><span className="font-mono">{ip}</span><Button type="button" variant="outline" size="sm" disabled={busy || (policy.require_office_network && policy.office_ips.length === 1)} onClick={() => void save({ office_ips: policy.office_ips.filter(x => x !== ip) }, `IP ${ip} eliminada.`)}>Quitar</Button></li>)}</ul>
+    <form className="flex gap-2" onSubmit={e => { e.preventDefault(); add(manual.trim()); setManual('') }}>
+      <Input aria-label="IP de la oficina" placeholder="Ej. 190.5.100.20" value={manual} onChange={e => setManual(e.target.value)} required />
+      <Button type="submit" variant="outline" disabled={busy}>Agregar</Button>
+    </form>
+    <p className="text-xs text-muted-foreground">Usa “Agregar mi IP actual” estando conectado al Wi-Fi de la oficina. Si la oficina tiene varios proveedores de internet, agrega la IP de cada uno.</p>
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </CardContent></Card>
 }
 

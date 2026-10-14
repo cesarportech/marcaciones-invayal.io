@@ -19,7 +19,7 @@ try {
   assert.ok(sessions.data.some(s => s.user_id === login.data.user.id), 'The current session must be listed')
   const purge = await client.rpc('invayal_purge_history', { confirmation: 'no' })
   assert.match(purge.error?.message ?? '', /BORRAR TODO/, 'Purge must require explicit confirmation')
-  const reset = await client.functions.invoke('invayal-admin', { body: { action: 'resetPassword', employeeId: profile.data.id, password: 'short' } })
+  const reset = await client.functions.invoke('invayal-admin', { body: { action: 'resetPassword', employeeId: profile.data.id, password: 'abc' } })
   assert.ok(reset.error, 'Weak password must be rejected without changing it')
   console.log('PASS: anonymous access denied, protected Edge Function, administrator login, session listing, purge confirmation and minimum password length. No data changed.')
 } finally { await client.auth.signOut() }
