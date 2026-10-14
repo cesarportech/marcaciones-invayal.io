@@ -40,7 +40,7 @@ npm run dev
 
 `dev:configure` genera `.env.development.local` con la URL y clave pública del Supabase local. No usa producción como alternativa. Si falta la configuración, la pantalla lo indica.
 
-Las migraciones inicializan las tablas locales. Crear el primer usuario local mediante Supabase Studio y vincularlo a `invayal_employees` con rol `admin`, usuario `administrador`, el ID de Auth correspondiente y un departamento. Usar como identificador interno `administrador@invayal.invalid`. No copiar usuarios ni contraseñas de producción.
+Las migraciones inicializan las tablas locales. `dev:configure` crea el primer administrador DEV si aún no existe y guarda su contraseña temporal en `.invayal-private/ACCESO-DEV.txt`. No copia usuarios ni contraseñas de producción.
 
 En este equipo no se encontró Docker, por lo que el backend DEV local todavía no se ha iniciado. La compilación estática y la conexión de producción sí se verificaron.
 
