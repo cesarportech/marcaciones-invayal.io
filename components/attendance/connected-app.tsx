@@ -19,7 +19,7 @@ type Profile = { id: string; user_id: string; username: string; full_name: strin
 type DepartmentRow = { id: string; name: string }
 type Policy = { start_time: string; end_time: string; tolerance_minutes: number; workdays: number[]; office_ips: string[]; require_office_network: boolean }
 type SessionInfo = { sessions: number; last_seen: string | null }
-type Snapshot = { profile: Profile; profiles: Profile[]; sessions: Record<string, SessionInfo>; employees: Employee[]; records: AttendanceRecord[]; rawTimes: Record<string, { clock_in: string; clock_out: string | null }>; departments: DepartmentRow[]; policy: Policy }
+type Snapshot = { profile: Profile; profiles: Profile[]; sessions: Record<string, SessionInfo>; sessionsAvailable: boolean; employees: Employee[]; records: AttendanceRecord[]; rawTimes: Record<string, { clock_in: string; clock_out: string | null }>; departments: DepartmentRow[]; policy: Policy }
 
 async function adminAction(body: Record<string, unknown>) {
   if (!supabase) throw new Error('Falta configurar Supabase.')
@@ -66,10 +66,15 @@ export function ConnectedApp() {
       ])
       if (employeesResult.error || departmentsResult.error || policyResult.error) throw new Error('No se pudo cargar la información de asistencia.')
       const sessions: Record<string, SessionInfo> = {}
+      let sessionsAvailable = true
       if (profile.role === 'admin') {
+        // Las sesiones son información complementaria: si fallan, el panel sigue funcionando.
         const { data, error } = await supabase.rpc('invayal_active_sessions')
-        if (error) throw new Error('No se pudieron cargar las sesiones activas.')
-        for (const row of data as Array<{ user_id: string } & SessionInfo>) sessions[row.user_id] = { sessions: row.sessions, last_seen: row.last_seen }
+        if (error || !Array.isArray(data)) {
+          sessionsAvailable = false
+          console.error('INVAYAL: no se pudieron cargar las sesiones activas', error)
+        }
+        else for (const row of data as Array<{ user_id: string } & SessionInfo>) sessions[row.user_id] = { sessions: row.sessions, last_seen: row.last_seen }
       }
       const rawRecords: Array<{ id: string; employee_id: string; work_date: string; clock_in: string; clock_out: string | null; scheduled_start: string; tolerance_minutes: number }> = []
       // Paginación explícita para no perder registros al alcanzar el límite de la API.
@@ -85,7 +90,7 @@ export function ConnectedApp() {
       const employees = profiles.map(p => ({ id: p.id, fullName: p.full_name, username: p.username, department: (departments.find(d => d.id === p.department_id)?.name ?? '') as Department, active: p.active }))
       const records = rawRecords.map(r => ({ id: r.id, employeeId: r.employee_id, date: r.work_date, clockIn: currentTimeHHMM(new Date(r.clock_in)), clockOut: r.clock_out ? currentTimeHHMM(new Date(r.clock_out)) : null, scheduledStart: r.scheduled_start.slice(0,5), toleranceMinutes: r.tolerance_minutes }))
       const rawTimes = Object.fromEntries(rawRecords.map(r => [r.id, { clock_in: r.clock_in, clock_out: r.clock_out }]))
-      setSnapshot({ profile, profiles, sessions, employees, records, rawTimes, departments, policy: policyResult.data })
+      setSnapshot({ profile, profiles, sessions, sessionsAvailable, employees, records, rawTimes, departments, policy: policyResult.data })
       setError('')
     } catch (e) {
       if (request === generation.current) { setSnapshot(null); setError(e instanceof Error ? e.message : 'No se pudo conectar con Supabase.') }
@@ -173,7 +178,8 @@ export function ConnectedApp() {
   </div>
 }
 
-function sessionLabel(info: SessionInfo | undefined) {
+function sessionLabel(info: SessionInfo | undefined, available: boolean) {
+  if (!available) return 'Estado de sesiones no disponible'
   if (!info) return 'Sin sesión activa'
   const seen = info.last_seen ? new Intl.DateTimeFormat('es-HN', { timeZone: 'America/Tegucigalpa', dateStyle: 'short', timeStyle: 'short' }).format(new Date(info.last_seen)) : '—'
   return `${info.sessions} ${info.sessions === 1 ? 'sesión activa' : 'sesiones activas'} · última actividad ${seen}`
@@ -191,7 +197,7 @@ function EmployeeAdmin({ snapshot, refresh }: { snapshot: Snapshot; refresh: () 
   }
   return <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
     <Card><CardHeader><CardTitle>Empleados ({snapshot.profiles.length})</CardTitle></CardHeader><CardContent className="space-y-3">
-      {snapshot.profiles.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div><p className="font-medium">{p.full_name}</p><p className="text-xs text-muted-foreground">{p.username} · {p.role === 'admin' ? 'Administrador' : 'Empleado'} · {p.active ? 'Activo' : 'Inactivo'}</p><p className="text-xs text-muted-foreground">{sessionLabel(snapshot.sessions[p.user_id])}</p></div><div className="flex flex-wrap gap-2">
+      {snapshot.profiles.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div><p className="font-medium">{p.full_name}</p><p className="text-xs text-muted-foreground">{p.username} · {p.role === 'admin' ? 'Administrador' : 'Empleado'} · {p.active ? 'Activo' : 'Inactivo'}</p><p className="text-xs text-muted-foreground">{sessionLabel(snapshot.sessions[p.user_id], snapshot.sessionsAvailable)}</p></div><div className="flex flex-wrap gap-2">
         <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={() => setResetId(p.id)}>Restablecer contraseña</Button>
         <Button variant="outline" size="sm" disabled={busy || p.role === 'admin'} onClick={async () => { setBusy(true); setError(''); try { await adminAction({ action: 'setActive', employeeId: p.id, active: !p.active }); await refresh() } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.') } finally { setBusy(false) } }}>{p.active ? 'Desactivar' : 'Activar'}</Button>
         <Button variant="outline" size="sm" disabled={busy || p.id === snapshot.profile.id || !snapshot.sessions[p.user_id]} onClick={async () => { setBusy(true); setError(''); try { await adminAction({ action: 'revokeSessions', employeeId: p.id }); await refresh(); toast.success(`Sesión cerrada para ${p.username}.`) } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cerrar la sesión.') } finally { setBusy(false) } }}>Cerrar sesión</Button>
