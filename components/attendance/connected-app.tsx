@@ -210,7 +210,7 @@ function EmployeeAdmin({ snapshot, refresh }: { snapshot: Snapshot; refresh: () 
       {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
       <form key={editId || resetId || 'create'} className="flex flex-col gap-3" onSubmit={submit}>
         {!resetId && <><Label htmlFor="fullName">Nombre completo</Label><Input name="fullName" id="fullName" defaultValue={editing?.full_name ?? ''} minLength={3} maxLength={150} required /><Label htmlFor="username">Usuario</Label><Input name="username" id="username" defaultValue={editing?.username ?? ''} readOnly={!!editId} pattern="[a-z0-9._]{3,30}" title="De 3 a 30 letras minúsculas, números, puntos o guiones bajos" required />{editId && <p className="text-xs text-muted-foreground">El usuario de acceso se conserva.</p>}</>}
-        {!editId && <><Label htmlFor="initial-password">Contraseña</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={4} maxLength={72} required /></>}
+        {!editId && <><Label htmlFor="initial-password">Contraseña (mínimo 6 caracteres)</Label><Input id="initial-password" name="password" type="password" autoComplete="new-password" minLength={6} maxLength={72} required /></>}
         <Button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</Button>{(resetId || editId) && <Button type="button" variant="outline" disabled={busy} onClick={() => { setResetId(''); setEditId(''); setError('') }}>Cancelar</Button>}
         {!editId && <p className="text-xs text-muted-foreground">Entrega la contraseña al empleado de forma privada. No se muestra ni se guarda en los reportes.</p>}
       </form>

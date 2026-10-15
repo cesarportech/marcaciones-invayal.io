@@ -25,7 +25,7 @@ Deno.serve(async (req: Request) => {
   }
   try {
     const body = await req.json()
-    if (typeof body.password === 'string' && (body.password.length < 4 || body.password.length > 72)) return respond({ error: 'La contraseña debe tener entre 4 y 72 caracteres.' }, 400)
+    if (typeof body.password === 'string' && (body.password.length < 6 || body.password.length > 72)) return respond({ error: 'La contraseña debe tener entre 6 y 72 caracteres.' }, 400)
     if (actor.role !== 'admin') return respond({ error: 'Se requiere acceso de administrador.' }, 403)
     if (body.action === 'create') {
       const username = String(body.username ?? '').trim().toLowerCase()
@@ -87,6 +87,10 @@ Deno.serve(async (req: Request) => {
     }
     return respond({ error: 'Acción inválida.' }, 400)
   } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'weak_password') return respond({ error: 'La contraseña no cumple los requisitos de seguridad. Usa al menos 6 caracteres y evita contraseñas comunes.' }, 400)
+      if (error.code === 'same_password') return respond({ error: 'La nueva contraseña debe ser diferente de la anterior.' }, 400)
+    }
     console.error('invayal-admin:', error)
     return respond({ error: 'No se pudo completar la operación. Verifica los datos e inténtalo de nuevo.' }, 400)
   }
